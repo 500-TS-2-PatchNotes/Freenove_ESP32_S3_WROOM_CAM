@@ -1,6 +1,7 @@
 #include "esp_system.h"
 #include "esp_camera.h"
 
+#define CAMERA_MODEL_ESP32S3_EYE
 
 // ===================================
 // Camera Pins
@@ -57,8 +58,8 @@ void setup() {
     .ledc_channel   = LEDC_CHANNEL_0,   // dw bout this (for leds on it)
 
     .pixel_format   = PIXFORMAT_JPEG,   
-    .frame_size     = FRAMESIZE_SVGA,
-    .jpeg_quality   = 12,
+    .frame_size     = FRAMESIZE_VGA,
+    .jpeg_quality   = 10,
 
     .fb_count       = 1,
     .fb_location    = CAMERA_FB_IN_DRAM,
@@ -68,8 +69,10 @@ void setup() {
   // Check if PSRAM is available, if so then use higher jpeg quality and increased frame size
   #if 1
   if (psramFound()) {
-    camera_config.jpeg_quality = 5;
-    camera_config.frame_size   = FRAMESIZE_UXGA;
+    Serial.println("PSRAM Found");
+    // camera_config.pixel_format = PIXFORMAT_RGB888;  
+    camera_config.jpeg_quality = 3;
+    // camera_config.frame_size   = FRAMESIZE_UXGA;
     camera_config.fb_location  = CAMERA_FB_IN_PSRAM;
   }
   #endif
@@ -86,8 +89,20 @@ void setup() {
   // Configure sensor if needed (TODO)
   sensor_t* camera_sensor = esp_camera_sensor_get();
   camera_sensor->set_vflip(camera_sensor, 1); // flip it back
-  camera_sensor->set_brightness(camera_sensor, 1); // up the brightness just a bit
+
+  // Neutral
+  camera_sensor->set_brightness(camera_sensor, 0); // up the brightness just a bit
   camera_sensor->set_saturation(camera_sensor, 0); // lower the saturation
+  camera_sensor->set_contrast(camera_sensor, 0);
+
+  camera_sensor->set_special_effect(camera_sensor, 0); // No effect
+  camera_sensor->set_whitebal(camera_sensor, 1);
+  camera_sensor->set_awb_gain(camera_sensor, 1);
+  camera_sensor->set_exposure_ctrl(camera_sensor, 1);
+  camera_sensor->set_aec2(camera_sensor, 1);
+  camera_sensor->set_lenc(camera_sensor, 1);
+  camera_sensor->set_colorbar(camera_sensor, 0);  
+
 
   // Initialization complete
   Serial.println();
@@ -114,10 +129,10 @@ void loop() {
   Serial.println("Image Start...");
 
   // Send size of buffer
-  Serial.write((uint8_t*)&fb->len, sizeof(fb->len));
+  // Serial.write((uint8_t*)&fb->len, sizeof(fb->len));
 
   // Send frame buffer
-  Serial.write(fb->buf, fb->len);
+  // Serial.write(fb->buf, fb->len);
 
   Serial.println("Image End...");
 
@@ -125,6 +140,5 @@ void loop() {
   esp_camera_fb_return(fb);
 
   // Wait for a certain time interval before capturing the next image
-  delay(3000); // 5 seconds delay
-
+  delay(1000); // 5 seconds delay
 }
