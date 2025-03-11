@@ -21,8 +21,7 @@ while True:
         if len(fb_size_raw) != 4:
             print("Failed to receive size")
         else:
-            fb_size = struct.unpack('<I', fb_size_raw)[0]
-
+            fb_size = int.from_bytes(fb_size_raw, byteorder='little')
             # Receive image data
             image_data = ser.read(fb_size)
 
