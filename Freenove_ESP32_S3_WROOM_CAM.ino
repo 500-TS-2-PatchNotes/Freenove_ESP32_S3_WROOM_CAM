@@ -1,7 +1,29 @@
 #include "esp_system.h"
 #include "esp_camera.h"
 
+#include <WiFi.h>
+#include <FS.h>
+#include <Firebase_ESP_Client.h>
+
 #define CAMERA_MODEL_ESP32S3_EYE
+
+// Insert Firebase project API Key
+#define API_KEY "AIzaSyB2NdPoW8WFrn0s1MxQmOsMkYrbpXraQNs"
+
+// Insert Authorized Email and Corresponding Password
+#define USER_EMAIL "nathanante36@gmail.com"
+#define USER_PASSWORD "Kamikaze102198!"
+
+// Insert Firebase storage bucket ID e.g bucket-name.appspot.com
+#define STORAGE_BUCKET_ID "patchnotes-d3b06.firebasestorage.app"
+// For example:
+//#define STORAGE_BUCKET_ID "esp-iot-app.appspot.com"
+
+// Photo File Name to save in LittleFS
+#define FILE_PHOTO_PATH "/photo.jpg"
+#define BUCKET_PHOTO "/data/photo.jpg"
+
+int counter = 0;
 
 // ===================================
 // Camera Pins
@@ -26,71 +48,105 @@
 #define PCLK_GPIO_NUM 13
 // ===================================
 
+const char* ssid = "SM-A536W2193";
+const char* password = "kamikaze1021";
+
+// Firebase objects
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   Serial.setDebugOutput(true);
-  Serial.printf("Initializing Camera\n");
-  Serial.printf("-------------------------------------------------------------------\n");
   Serial.println();
+
+  // Initialize WiFi and Little File System
+  initWiFi();
+  // initLittleFS();
 
   // Initialize Camera
   initCamera();
+  //configureCameraSensor();
 
-  // Configure Camera Sensor
-  configureCameraSensor();
+  // Firebase
+  // Assign the api key 
+  config.api_key = API_KEY;
+  //Assign the user sign in credentials
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  Serial.println("Connecting to Firebase...");
+  unsigned long timeout = millis() + 10000; // 10 seconds timeout
+  while (!Firebase.ready()) {
+    Serial.print(".");
+    delay(500);
+    if (millis() > timeout) {
+      Serial.println("\nFailed to connect to Firebase!");
+      return;
+    }
+  }
+
+  Serial.println("\nConnected to Firebase!");
 
   // Initialization complete
   Serial.println();
   Serial.println("-------------------------------------------------------------------");
-  Serial.println("Camera initialization successful, commencing image capture");
+  Serial.println("Board initialization successful, commencing image capture");
   Serial.println("-------------------------------------------------------------------");
   Serial.println();
 }
 
 void loop() {
+  // // Frame buffer pointer
+  // camera_fb_t* fb = NULL;
 
-  // Frame buffer pointer
-  camera_fb_t* fb = NULL;
-
-  // Doing it a bunch to let the auto adjusting parameters settle... (testing needed)
-  for (uint8_t i = 0; i < 25; i++) {
-    fb = esp_camera_fb_get();
-    esp_camera_fb_return(fb);
-    fb = NULL;
-  }
+  // // Doing it a bunch to let the auto adjusting parameters settle... (testing needed)
+  // for (uint8_t i = 0; i < 25; i++) {
+  //   fb = esp_camera_fb_get();
+  //   esp_camera_fb_return(fb);
+  //   fb = NULL;
+  // }
   
-  // Capture Image
-  fb = esp_camera_fb_get();
+  // // Capture Image
+  // fb = esp_camera_fb_get();
 
-  if (!fb) {
-    Serial.println("Camera capture failed");
-    return;
-  } else {
-    Serial.printf("Captured image size: %d bytes\n", fb->len);
-    Serial.printf("Total PSRAM: %d bytes\n", ESP.getPsramSize());
-    Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
-    Serial.printf("Used PSRAM: %d bytes\n", ESP.getPsramSize() - ESP.getFreePsram());
-  }
+  // if (!fb) {
+  //   Serial.println("Camera capture failed");
+  //   return;
+  // } else {
+  //   Serial.printf("Captured image size: %d bytes\n", fb->len);
+  //   Serial.printf("Total PSRAM: %d bytes\n", ESP.getPsramSize());
+  //   Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
+  //   Serial.printf("Used PSRAM: %d bytes\n", ESP.getPsramSize() - ESP.getFreePsram());
+  // }
 
-  Serial.println("Image Start...");
+  // Serial.println("Image Start...");
 
-  // Send size of buffer
-  Serial.write((uint8_t*)&fb->len, sizeof(fb->len));
+  // // Send size of buffer
+  // Serial.write((uint8_t*)&fb->len, sizeof(fb->len));
 
-  // Send frame buffer
-  Serial.write(fb->buf, fb->len);
+  // // Send frame buffer
+  // Serial.write(fb->buf, fb->len);
 
-  Serial.println("Image End...");
+  // Serial.println("Image End...");
 
   // Return fb
-  esp_camera_fb_return(fb);
+  // esp_camera_fb_return(fb);
+
+  uploadPhoto();
 
   // Wait for a certain time interval before capturing the next image
-  delay(1000); // 5 seconds delay
+  delay(5000); // 5 seconds delay
 }
 
 void initCamera() {
+  Serial.println("Initializing Camera");
+  Serial.println("-------------------------------------------------------------------");
+
   // Initialize camera interface with correct pins
   static camera_config_t camera_config = {
     .pin_pwdn       = PWDN_GPIO_NUM,
@@ -142,12 +198,15 @@ void initCamera() {
       Serial.println();
       delay(500);
     }
+  } else {
+    Serial.printf("Camera initialization was successful\n");
   }
 }
 
 void configureCameraSensor() {
+  Serial.println("Configuring camera sensor parameters");
   // Main ones to adjust are aec_value, agc_gain
-  sensor_t * s = esp_camera_sensor_get();
+  sensor_t *s = esp_camera_sensor_get();
   
   // Brightness, Contrast, and, Saturation
   s->set_brightness(s, 0);     // -2 to 2
@@ -198,4 +257,43 @@ void configureCameraSensor() {
   // dcw: downscaling (apparently good for color and noise, but reduces resolution)
   s->set_dcw(s, 1);            // 0 = disable , 1 = enable
   s->set_colorbar(s, 0);       // 0 = disable , 1 = enable
+}
+
+void initWiFi(){
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi!!!");
+}
+
+void uploadPhoto() {
+  Serial.printf("Capturing an image: %d\n", counter);
+
+  // Frame buffer pointer
+  camera_fb_t* fb = NULL;
+
+  // Doing it a bunch to let the auto adjusting parameters settle... (testing needed)
+  for (uint8_t i = 0; i < 10; i++) {
+    fb = esp_camera_fb_get();
+    esp_camera_fb_return(fb);
+    fb = NULL;
+  }
+  
+  // Capture Image
+  fb = esp_camera_fb_get();
+  Serial.printf("Captured %d bytes\n", fb->len);
+
+  // Upload to Firebase
+  String path = "/testImages/" + String(counter) + ".jpg";
+  if (Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID, fb->buf, fb->len, path.c_str(), "image/jpeg")) {
+    Serial.println("Upload success!");
+  } else {
+    Serial.println("Upload failed: " + fbdo.errorReason());
+  }
+
+  esp_camera_fb_return(fb);
+
+  counter++;
 }
