@@ -130,7 +130,7 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
 
-  //
+  // Initialize Bluetooth
   initBluetooth();
 
   // Initialize WiFi
@@ -152,26 +152,30 @@ void setup() {
 }
 
 void loop() {
-  // 
-  // uploadPhoto();
-  // Wait for a certain time interval before capturing the next image
-  Serial.println(".");
-  delay(1000); // 5 seconds delay
-}
-
-void initWiFi(){
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
+  if (WiFi.status() != WL_CONNECTED) {              // Check for WiFi connection, if not then try to establish one
     Serial.println("Connecting to WiFi...");
+    WiFi.begin(wifiID, wifiPassword);
+    delay(1000);
+
   }
-  Serial.println("Connected to WiFi!!!");
+
+  if (WiFi.status() == WL_CONNECTED && !Firebase.ready()) {     
+    Serial.println("No connection to Firebase!");
+    connectFirebase();
+  }
+  
+  if (WiFi.status() == WL_CONNECTED && Firebase.ready()) {
+    Serial.println("Got here!!!");
+    // Wait for a certain time interval before capturing the next image
+    uploadPhoto();
+    delay(5000); // 5 seconds delay
+  }
 }
 
-void initFirebase() {
+void connectFirebase() {
   config.api_key = API_KEY;           // Assign the api key 
-  auth.user.email = USER_EMAIL;       // Assign the user sign in credentials
-  auth.user.password = USER_PASSWORD;
+  auth.user.email = userEmail;        // Assign the user sign in credentials
+  auth.user.password = userPassword;
   Firebase.begin(&config, &auth);     // Start firebase connection
   Firebase.reconnectWiFi(true);
 
@@ -185,13 +189,13 @@ void initFirebase() {
       return;
     }
   }
-
-  Serial.println("\nConnected to Firebase!");
+  Serial.println("\nConnected to Firebase!\n");
 }
 
 void initBluetooth() {
   // Initialize BLE
   BLEDevice::init("PatchNotes-Device-1");
+  BLEDevice::setMTU(50);
   BLEServer *pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService(SERVICE_UUID);
 
@@ -218,11 +222,6 @@ void initBluetooth() {
 
   // Bind callbacks
   pServer->setCallbacks(new ServerCallbacks());
-  //pCharacteristic->setCallbacks(new CharacteristicCallbacks());
-  // pWifiID->setCallbacks(new WifiIDCallbacks());
-  // pWifiPassword->setCallbacks(new WifiPasswordCallbacks());
-  // pUserEmail->setCallbacks(new UserEmailCallbacks());
-  // pUserPassword->setCallbacks(new UserPasswordCallbacks());
   pWifiID->setCallbacks(new CharacteristicCallbacks());
   pWifiPassword->setCallbacks(new CharacteristicCallbacks());
   pUserEmail->setCallbacks(new CharacteristicCallbacks());
@@ -264,7 +263,41 @@ void uploadPhoto() {
   } else {
     Serial.println("Upload failed: " + fbdo.errorReason());
   }
-
   esp_camera_fb_return(fb);
   counter++;
 }
+
+
+
+/*
+=========================================== Legacy Stuffs ===========================================
+
+void initWiFi(){
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi!!!");
+}
+
+void initFirebase() {
+  config.api_key = API_KEY;           // Assign the api key 
+  auth.user.email = USER_EMAIL;       // Assign the user sign in credentials
+  auth.user.password = USER_PASSWORD;
+  Firebase.begin(&config, &auth);     // Start firebase connection
+  Firebase.reconnectWiFi(true);
+
+  Serial.println("Connecting to Firebase...");
+  unsigned long timeout = millis() + 10000; // 10 seconds timeout
+  while (!Firebase.ready()) {
+    Serial.print(".");
+    delay(500);
+    if (millis() > timeout) {
+      Serial.println("\nFailed to connect to Firebase!");
+      return;
+    }
+  }
+  Serial.println("\nConnected to Firebase!\n");
+}
+*/
