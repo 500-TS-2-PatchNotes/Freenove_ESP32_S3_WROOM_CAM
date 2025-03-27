@@ -6,27 +6,10 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include "camera_utils.h"
+#include "connection_utils.h"
 // #include <BLE2902.h>
 
-/* ======================= BLE Prototype Defines =======================*/
-#define SERVICE_UUID        "bf897488-0ed2-4425-8051-a4a26ef47c56"
-#define USER_EMAIL_UUID     "7d7d38ae-19f7-47d0-8abf-0608322fd9ed"
-#define USER_PASSWORD_UUID  "4c45320c-2df8-4af8-81d3-e7c034091d44"
-#define WIFI_ID_UUID        "f715c633-51b8-44aa-9726-caffb54f89e9"
-#define WIFI_PASSWORD_UUID  "b8c4c56e-9b7e-46f3-87f7-dba6911b0460"
-#define TIMESTAMP_UUID      "ce84f75a-0aea-48cf-ba77-aec1a27a9169"
-
-/* ======================= Firebase Prototype Defines =======================*/
-#define API_KEY "AIzaSyB2NdPoW8WFrn0s1MxQmOsMkYrbpXraQNs"            // Insert Firebase project API Key
-#define USER_EMAIL "nathanante36@gmail.com"                          // Insert Authorized Email and Corresponding Password
-#define USER_PASSWORD "Kamikaze102198!"
-#define STORAGE_BUCKET_ID "patchnotes-d3b06.firebasestorage.app"     // Insert Firebase storage bucket ID e.g bucket-name.appspot.com
-#define FILE_PHOTO_PATH "/photo.jpg"                                 // Prototypes for filename in backend storage
-#define BUCKET_PHOTO "/data/photo.jpg"
-
 /* ======================= Global Variables ======================= */
-const char* ssid = "SM-A536W2193";
-const char* password = "kamikaze1021";
 int counter = 0;
 
 // Firebase objects
@@ -35,11 +18,18 @@ FirebaseAuth auth;
 FirebaseConfig config;
 
 // Bluetooth variables
+BLECharacteristic *pWifiID;
+BLECharacteristic *pWifiPassword;
+BLECharacteristic *pUserEmail;
+BLECharacteristic *pUserPassword;
+BLECharacteristic *pTimestamp;
+
 bool bluetoothConnection = false;
 String wifiID;
 String wifiPassword;
 String userEmail;
 String userPassword;
+String timestamp;
 
 /* ======================= BLE Callbacks ======================= */
 class ServerCallbacks : public BLEServerCallbacks {
@@ -81,48 +71,14 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
         wifiPassword = value;
         Serial.print("Wifi password received: ");
         Serial.println(value);
+      } else if (uuid == TIMESTAMP_UUID) {
+        timestamp = value;
+        Serial.print("Timestamp received: ");
+        Serial.println(value);
       }
     }
   }
 };
-
-/*
-class UserEmailCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* pCharacteristic) {
-    
-  } 
-  void onRead(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-};
-
-class UserPasswordCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-  void onRead(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-};
-
-class WifiIDCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-  void onRead(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-};
-
-class WifiPasswordCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-  void onRead(BLECharacteristic* pCharacteristic) {
-    // add here
-  } 
-};
-*/
 
 void setup() {
   // put your setup code here, to run once:
@@ -133,43 +89,109 @@ void setup() {
   // Initialize Bluetooth
   initBluetooth();
 
-  // Initialize WiFi
-  // initWiFi();
-
   // Initialize Camera
   initCamera();
   configureCameraSensor();
 
-  // Firebase
-  // initFirebase();
-
   // Initialization complete
-  Serial.println();
-  Serial.println("-------------------------------------------------------------------");
+  Serial.println("\n-------------------------------------------------------------------");
   Serial.println("Board initialization successful, commencing image capture");
-  Serial.println("-------------------------------------------------------------------");
-  Serial.println();
+  Serial.println("-------------------------------------------------------------------\n");
 }
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {              // Check for WiFi connection, if not then try to establish one
-    Serial.println("Connecting to WiFi...");
-    WiFi.begin(wifiID, wifiPassword);
-    delay(1000);
 
-  }
+    // Notify flutter app to send WiFi credentials
+    pWifiID->setValue("request");
+    pWifiPassword->setValue("request");
+    pWifiID->notify();
+    pWifiPassword->notify();
+    
+    // Attempt to connect 10 times with received credentials
+    Serial.print("Connecting to WiFi...");
+    for (int i = 0; i < 10; i++) {
+      WiFi.begin(wifiID, wifiPassword);
+      delay(1000);
+      if (WiFi.status() == WL_CONNECTED) {
+        break;
+      }
+      Serial.print(".");
+    }
 
-  if (WiFi.status() == WL_CONNECTED && !Firebase.ready()) {     
-    Serial.println("No connection to Firebase!");
-    connectFirebase();
+    Serial.println();
+    
+  } else {
+    if (!Firebase.ready()) {     
+      // Notify flutter app to send WiFi credentials
+      pUserEmail->setValue("request");
+      pUserPassword->setValue("request");
+      pUserEmail->notify();
+      pUserPassword->notify();
+
+      Serial.println("No connection to Firebase!");
+      connectFirebase();
+    }
+    else {
+      Serial.println("Got here!!!");
+      // Wait for a certain time interval before capturing the next image
+      // uploadPhoto();
+      delay(5000); // 5 seconds delay
+    }
   }
-  
-  if (WiFi.status() == WL_CONNECTED && Firebase.ready()) {
-    Serial.println("Got here!!!");
-    // Wait for a certain time interval before capturing the next image
-    uploadPhoto();
-    delay(5000); // 5 seconds delay
-  }
+}
+
+void initBluetooth() {
+  // Initialize BLE
+  BLEDevice::init("PatchNotes-Device-1");
+  BLEDevice::setMTU(50);
+  BLEServer *pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Define characteristics
+  pWifiID = pService->createCharacteristic(
+                                        WIFI_ID_UUID,
+                                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  pWifiPassword = pService->createCharacteristic(
+                                      WIFI_PASSWORD_UUID,
+                                      BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
+                                      );
+
+  pUserEmail = pService->createCharacteristic(
+                                        USER_EMAIL_UUID,
+                                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  pUserPassword = pService->createCharacteristic(
+                                        USER_PASSWORD_UUID,
+                                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  pTimestamp = pService->createCharacteristic(
+                                        TIMESTAMP_UUID,
+                                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  // Bind callbacks
+  pServer->setCallbacks(new ServerCallbacks());
+  pWifiID->setCallbacks(new CharacteristicCallbacks());
+  pWifiPassword->setCallbacks(new CharacteristicCallbacks());
+  pUserEmail->setCallbacks(new CharacteristicCallbacks());
+  pUserPassword->setCallbacks(new CharacteristicCallbacks());
+  pTimestamp->setCallbacks(new CharacteristicCallbacks());
+
+  // Start the service
+  pService->start();
+
+  // Start Advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
 }
 
 void connectFirebase() {
@@ -192,53 +214,6 @@ void connectFirebase() {
   Serial.println("\nConnected to Firebase!\n");
 }
 
-void initBluetooth() {
-  // Initialize BLE
-  BLEDevice::init("PatchNotes-Device-1");
-  BLEDevice::setMTU(50);
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  // Define characteristics
-  BLECharacteristic *pWifiID = pService->createCharacteristic(
-                                        WIFI_ID_UUID,
-                                        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
-                                       );
-
-  BLECharacteristic *pWifiPassword = pService->createCharacteristic(
-                                      WIFI_PASSWORD_UUID,
-                                      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
-                                      );
-
-  BLECharacteristic *pUserEmail = pService->createCharacteristic(
-                                        USER_EMAIL_UUID,
-                                        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
-                                       );
-
-  BLECharacteristic *pUserPassword = pService->createCharacteristic(
-                                        USER_PASSWORD_UUID,
-                                        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
-                                       );
-
-  // Bind callbacks
-  pServer->setCallbacks(new ServerCallbacks());
-  pWifiID->setCallbacks(new CharacteristicCallbacks());
-  pWifiPassword->setCallbacks(new CharacteristicCallbacks());
-  pUserEmail->setCallbacks(new CharacteristicCallbacks());
-  pUserPassword->setCallbacks(new CharacteristicCallbacks());
-
-  // Start the service
-  pService->start();
-
-  // Start Advertising
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
-  pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-}
-
 void uploadPhoto() {
   Serial.printf("Capturing an image: %d\n", counter);
 
@@ -246,7 +221,7 @@ void uploadPhoto() {
   camera_fb_t* fb = NULL;
 
   // Doing it a bunch to let the auto adjusting parameters settle... (testing needed)
-  for (uint8_t i = 0; i < 10; i++) {
+  for (uint8_t i = 0; i < 5; i++) {
     fb = esp_camera_fb_get();
     esp_camera_fb_return(fb);
     fb = NULL;
@@ -263,41 +238,7 @@ void uploadPhoto() {
   } else {
     Serial.println("Upload failed: " + fbdo.errorReason());
   }
+
   esp_camera_fb_return(fb);
   counter++;
 }
-
-
-
-/*
-=========================================== Legacy Stuffs ===========================================
-
-void initWiFi(){
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-  }
-  Serial.println("Connected to WiFi!!!");
-}
-
-void initFirebase() {
-  config.api_key = API_KEY;           // Assign the api key 
-  auth.user.email = USER_EMAIL;       // Assign the user sign in credentials
-  auth.user.password = USER_PASSWORD;
-  Firebase.begin(&config, &auth);     // Start firebase connection
-  Firebase.reconnectWiFi(true);
-
-  Serial.println("Connecting to Firebase...");
-  unsigned long timeout = millis() + 10000; // 10 seconds timeout
-  while (!Firebase.ready()) {
-    Serial.print(".");
-    delay(500);
-    if (millis() > timeout) {
-      Serial.println("\nFailed to connect to Firebase!");
-      return;
-    }
-  }
-  Serial.println("\nConnected to Firebase!\n");
-}
-*/
