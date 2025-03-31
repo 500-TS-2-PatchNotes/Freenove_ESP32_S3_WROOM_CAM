@@ -29,8 +29,8 @@ void initCamera() {
     .ledc_channel   = LEDC_CHANNEL_0,   // dw bout this (for leds on it)
 
     .pixel_format   = PIXFORMAT_JPEG,   
-    .frame_size     = FRAMESIZE_VGA,
-    .jpeg_quality   = 10,
+    .frame_size     = FRAMESIZE_HVGA,
+    .jpeg_quality   = 15,
 
     .fb_count       = 1,
     .fb_location    = CAMERA_FB_IN_DRAM,
@@ -42,7 +42,7 @@ void initCamera() {
   if (psramFound()) {
     Serial.println("PSRAM Found");
     // camera_config.pixel_format = PIXFORMAT_RGB888;  // does not work, cuz camera is dooks
-    camera_config.jpeg_quality = 6;
+    camera_config.jpeg_quality = 5;
     camera_config.frame_size   = FRAMESIZE_VGA;
     camera_config.fb_location  = CAMERA_FB_IN_PSRAM;
   }
@@ -68,16 +68,16 @@ void configureCameraSensor() {
   
   // Brightness, Contrast, and, Saturation
   s->set_brightness(s, 0);     // -2 to 2
-  s->set_contrast(s, 0);       // -2 to 2
-  s->set_saturation(s, 0);     // -2 to 2
+  s->set_contrast(s, 2);       // -2 to 2
+  s->set_saturation(s, -2);     // -2 to 2
 
   // Special Effects
   s->set_special_effect(s, 0); // 0 to 6 (0 - No Effect, 1 - Negative, 2 - Grayscale, 3 - Red Tint, 4 - Green Tint, 5 - Blue Tint, 6 - Sepia)
 
   // White Balance
-  s->set_whitebal(s, 1);       // 0 = disable , 1 = enable
-  s->set_awb_gain(s, 1);       // 0 = disable , 1 = enable
-  s->set_wb_mode(s, 4);        // 0 to 4 - if awb_gain enabled (0 - Auto, 1 - Sunny, 2 - Cloudy, 3 - Office, 4 - Home)
+  s->set_whitebal(s, 0);       // 0 = disable , 1 = enable
+  s->set_awb_gain(s, 0);       // 0 = disable , 1 = enable
+  s->set_wb_mode(s, 0);        // 0 to 4 - if awb_gain enabled (0 - Auto, 1 - Sunny, 2 - Cloudy, 3 - Office, 4 - Home)
 
   // Exposure control
   /*
@@ -85,15 +85,15 @@ void configureCameraSensor() {
     - aec2: auto exposure control
     - aec value: higher values for darker environments
   */
-  s->set_exposure_ctrl(s, 1);  // 0 = disable , 1 = enable
+  s->set_exposure_ctrl(s, 0);  // 0 = disable , 1 = enable
   s->set_aec2(s, 0);           // 0 = disable , 1 = enable
   s->set_ae_level(s, 0);       // -2 to 2
-  s->set_aec_value(s, 100);    // 0 to 1200
+  s->set_aec_value(s, 1000);    // 0 to 1200
 
   // Gain Control
-  s->set_gain_ctrl(s, 1);      // 0 = disable , 1 = enable
-  s->set_agc_gain(s, 0);       // 0 to 30
-  s->set_gainceiling(s, (gainceiling_t)0);  // 0 to 6
+  s->set_gain_ctrl(s, 0);      // 0 = disable , 1 = enable
+  s->set_agc_gain(s, 10);       // 0 to 30
+  // s->set_gainceiling(s, (gainceiling_t)0);  // 0 to 6
 
   // Image processing
   /*
@@ -104,53 +104,15 @@ void configureCameraSensor() {
     - lenc: lens correction for distortion
   */
   s->set_bpc(s, 0);            // 0 = disable , 1 = enable
-  s->set_wpc(s, 0);            // 0 = disable , 1 = enable
+  s->set_wpc(s, 1);            // 0 = disable , 1 = enable
   s->set_raw_gma(s, 1);        // 0 = disable , 1 = enable
   s->set_lenc(s, 1);           // 0 = disable , 1 = enable
 
   // Mirror and Flip
   s->set_hmirror(s, 0);        // 0 = disable , 1 = enable
-  s->set_vflip(s, 0);          // 0 = disable , 1 = enable
+  s->set_vflip(s, 1);          // 0 = disable , 1 = enable
 
   // dcw: downscaling (apparently good for color and noise, but reduces resolution)
   s->set_dcw(s, 1);            // 0 = disable , 1 = enable
   s->set_colorbar(s, 0);       // 0 = disable , 1 = enable
-}
-
-void captureSerial() {
-  // Frame buffer pointer
-  camera_fb_t* fb = NULL;
-
-  // Doing it a bunch to let the auto adjusting parameters settle... (testing needed)
-  for (uint8_t i = 0; i < 25; i++) {
-    fb = esp_camera_fb_get();
-    esp_camera_fb_return(fb);
-    fb = NULL;
-  }
-  
-  // Capture Image
-  fb = esp_camera_fb_get();
-
-  if (!fb) {
-    Serial.println("Camera capture failed");
-    return;
-  } else {
-    Serial.printf("Captured image size: %d bytes\n", fb->len);
-    Serial.printf("Total PSRAM: %d bytes\n", ESP.getPsramSize());
-    Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
-    Serial.printf("Used PSRAM: %d bytes\n", ESP.getPsramSize() - ESP.getFreePsram());
-  }
-
-  Serial.println("Image Start...");
-
-  // Send size of buffer
-  Serial.write((uint8_t*)&fb->len, sizeof(fb->len));
-
-  // Send frame buffer
-  Serial.write(fb->buf, fb->len);
-
-  Serial.println("Image End...");
-
-  // Return fb
-  esp_camera_fb_return(fb);
 }

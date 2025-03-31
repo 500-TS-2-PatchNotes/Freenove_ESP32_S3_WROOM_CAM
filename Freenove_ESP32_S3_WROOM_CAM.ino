@@ -1,10 +1,12 @@
 /* ======================= File Includes =======================*/
 #include <Arduino.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include <time.h>
 #include "camera_utils.h"
 #include "connection_utils.h"
 // #include <BLE2902.h>
@@ -20,16 +22,19 @@ FirebaseConfig config;
 // Bluetooth variables
 BLECharacteristic *pWifiID;
 BLECharacteristic *pWifiPassword;
-BLECharacteristic *pUserEmail;
-BLECharacteristic *pUserPassword;
-BLECharacteristic *pTimestamp;
+BLECharacteristic *pUserID;
 
 bool bluetoothConnection = false;
 String wifiID;
 String wifiPassword;
-String userEmail;
-String userPassword;
+String userID;
+
+// NTP server and offsets for timestamp
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = -25200;  // MST (UTC-7)
+const int daylightOffset_sec = 0;   // No daylight saving time (Standard Time)
 String timestamp;
+
 
 /* ======================= BLE Callbacks ======================= */
 class ServerCallbacks : public BLEServerCallbacks {
@@ -39,6 +44,7 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer* pServer) {
     bluetoothConnection = false;
+    userID = "";
     Serial.println("Bluetooth device disconnected...");
     BLEDevice::startAdvertising();
   }
@@ -55,13 +61,9 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       Serial.println(uuid);
 
       // Store the received values in the appropriate variables
-      if (uuid == USER_EMAIL_UUID) {
-        userEmail = value;
-        Serial.print("User email received: ");
-        Serial.println(value);
-      } else if (uuid == USER_PASSWORD_UUID) {
-        userPassword = value;
-        Serial.print("User password received: ");
+      if (uuid == USER_ID_UUID) {
+        userID = value;
+        Serial.print("User ID received: ");
         Serial.println(value);
       } else if (uuid == WIFI_ID_UUID) {
         wifiID = value;
@@ -71,10 +73,6 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
         wifiPassword = value;
         Serial.print("Wifi password received: ");
         Serial.println(value);
-      } else if (uuid == TIMESTAMP_UUID) {
-        timestamp = value;
-        Serial.print("Timestamp received: ");
-        Serial.println(value);
       }
     }
   }
@@ -82,16 +80,20 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
 
 void setup() {
   // put your setup code here, to run once:
-  Serial.begin(115200);
+  Serial.begin(921600);
   Serial.setDebugOutput(true);
   Serial.println();
+
+  // TODO: Set pin 22 to high...
+  pinMode(22, OUTPUT);  // Set pin as output
+  digitalWrite(22, HIGH);
 
   // Initialize Bluetooth
   initBluetooth();
 
   // Initialize Camera
   initCamera();
-  configureCameraSensor();
+  // configureCameraSensor();
 
   // Initialization complete
   Serial.println("\n-------------------------------------------------------------------");
@@ -107,6 +109,11 @@ void loop() {
     pWifiPassword->setValue("request");
     pWifiID->notify();
     pWifiPassword->notify();
+
+    Serial.printf("Free Heap: %d bytes\n", ESP.getFreeHeap());
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);
+    delay(100);
     
     // Attempt to connect 10 times with received credentials
     Serial.print("Connecting to WiFi...");
@@ -114,6 +121,7 @@ void loop() {
       WiFi.begin(wifiID, wifiPassword);
       delay(1000);
       if (WiFi.status() == WL_CONNECTED) {
+        configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
         break;
       }
       Serial.print(".");
@@ -123,20 +131,14 @@ void loop() {
     
   } else {
     if (!Firebase.ready()) {     
-      // Notify flutter app to send WiFi credentials
-      pUserEmail->setValue("request");
-      pUserPassword->setValue("request");
-      pUserEmail->notify();
-      pUserPassword->notify();
-
       Serial.println("No connection to Firebase!");
       connectFirebase();
     }
     else {
       Serial.println("Got here!!!");
       // Wait for a certain time interval before capturing the next image
-      // uploadPhoto();
-      delay(5000); // 5 seconds delay
+      uploadPhoto();
+      delay(10000); // 5 seconds delay
     }
   }
 }
@@ -159,18 +161,8 @@ void initBluetooth() {
                                       BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
                                       );
 
-  pUserEmail = pService->createCharacteristic(
-                                        USER_EMAIL_UUID,
-                                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
-                                       );
-
-  pUserPassword = pService->createCharacteristic(
-                                        USER_PASSWORD_UUID,
-                                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
-                                       );
-
-  pTimestamp = pService->createCharacteristic(
-                                        TIMESTAMP_UUID,
+  pUserID = pService->createCharacteristic(
+                                        USER_ID_UUID,
                                         BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_WRITE
                                        );
 
@@ -178,9 +170,7 @@ void initBluetooth() {
   pServer->setCallbacks(new ServerCallbacks());
   pWifiID->setCallbacks(new CharacteristicCallbacks());
   pWifiPassword->setCallbacks(new CharacteristicCallbacks());
-  pUserEmail->setCallbacks(new CharacteristicCallbacks());
-  pUserPassword->setCallbacks(new CharacteristicCallbacks());
-  pTimestamp->setCallbacks(new CharacteristicCallbacks());
+  pUserID->setCallbacks(new CharacteristicCallbacks());
 
   // Start the service
   pService->start();
@@ -196,8 +186,8 @@ void initBluetooth() {
 
 void connectFirebase() {
   config.api_key = API_KEY;           // Assign the api key 
-  auth.user.email = userEmail;        // Assign the user sign in credentials
-  auth.user.password = userPassword;
+  auth.user.email = EMAIL_KEY;        // Assign the user sign in credentials
+  auth.user.password = PASSWORD_KEY;
   Firebase.begin(&config, &auth);     // Start firebase connection
   Firebase.reconnectWiFi(true);
 
@@ -214,14 +204,31 @@ void connectFirebase() {
   Serial.println("\nConnected to Firebase!\n");
 }
 
+void updateTimestamp() {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+        timestamp = "TimeError";
+        return;
+    }
+    
+    char buffer[20];  // Buffer to store formatted timestamp
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S", &timeinfo);
+    
+    timestamp = String(buffer);  // Update global timestamp
+}
+
 void uploadPhoto() {
+  if (userID == "") {
+    return;
+  }
+
   Serial.printf("Capturing an image: %d\n", counter);
 
   // Frame buffer pointer
   camera_fb_t* fb = NULL;
 
   // Doing it a bunch to let the auto adjusting parameters settle... (testing needed)
-  for (uint8_t i = 0; i < 5; i++) {
+  for (uint8_t i = 0; i < 15; i++) {
     fb = esp_camera_fb_get();
     esp_camera_fb_return(fb);
     fb = NULL;
@@ -231,8 +238,11 @@ void uploadPhoto() {
   fb = esp_camera_fb_get();
   Serial.printf("Captured %d bytes\n", fb->len);
 
+  // Update timestamp
+  updateTimestamp();
+  
   // Upload to Firebase
-  String path = "/testImages/" + String(counter) + ".jpg";
+  String path = "/images/" + userID + "/" + timestamp  + ".jpg";
   if (Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID, fb->buf, fb->len, path.c_str(), "image/jpeg")) {
     Serial.println("Upload success!");
   } else {
